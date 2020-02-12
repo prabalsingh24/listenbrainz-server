@@ -29,7 +29,7 @@ class RMQSnooperSubscriber(ListenWriter):
         self.channel = None
         self.stats = {}
         self.t0 = 0.0
-        self.last_update = 0.0
+        self.next_update = time() + UPDATE_INTERVAL
 
 
     def callback(self, ch, method, properties, body):
@@ -38,7 +38,7 @@ class RMQSnooperSubscriber(ListenWriter):
 
         while True:
             try:
-                self.incoming_ch.basic_ack(delivery_tag = method.delivery_tag)
+                self.channel.basic_ack(delivery_tag = method.delivery_tag)
                 break
             except pika.exceptions.ConnectionClosed:
                 self.connect_to_rabbitmq()
@@ -54,27 +54,28 @@ class RMQSnooperSubscriber(ListenWriter):
         for listen in listens:
             user_name = listen['user_name']
             if not user_name in self.stats:
-                self.stats[username] = 0
+                self.stats[user_name] = 0
 
             self.stats[user_name] += 1
 
-        if self.last_update > UPDATE_INTERVAL:
+        if self.next_update <= time():
             self.print_stats()
-            self.last_update = time()
+            self.next_update = time() + UPDATE_INTERVAL
 
    
     def print_stats(self):
-        for k in sorted(self.stats, key=self.stats.get, reverse=True):
+        for k in sorted(self.stats, key=self.stats.get, reverse=True)[:25]:
             print("%32s: %d" % (k, self.stats[k]))
 
         print()
 
 
-    def start(self, app, exchange, queue):
+    def start(self, exchange, queue):
 
         self.t0 = time()
         self.last_update = 0.0
 
+        app = create_app()
         with app.app_context():
             self._verify_hosts_in_config()
 
@@ -89,7 +90,7 @@ class RMQSnooperSubscriber(ListenWriter):
                     queue=queue,
                 )
 
-                current_app.logger.info("rmq snooper started")
+                print("rmq snooper started")
                 try:
                     self.channel.start_consuming()
                 except pika.exceptions.ConnectionClosed:
@@ -102,5 +103,4 @@ class RMQSnooperSubscriber(ListenWriter):
 
 if __name__ == "__main__":
     rmq = RMQSnooperSubscriber()
-    app = create_app()
-    rmq.start(app, app.config['INCOMING_EXCHANGE'], app.config['INCOMING_QUEUE'])
+    rmq.start("incoming", "incoming")
