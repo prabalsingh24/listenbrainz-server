@@ -59,6 +59,8 @@ def _convert_spotify_play_to_listen(play, listen_type):
             'listened_at': int(parser.parse(play['played_at']).timestamp()),
         }
 
+    if not track:
+        return None
 
     album = track['album']
     artists = track['artists']
@@ -218,7 +220,7 @@ def parse_and_validate_spotify_plays(plays, listen_type, latest_listened_at = 0)
     listens = []
     for play in plays:
         listen = _convert_spotify_play_to_listen(play, listen_type=listen_type)
-        if latest_listened_at and listen.listened_at <= latest_listened_at:
+        if latest_listened_at and listen and listen.listened_at <= latest_listened_at:
             continue
 
         try:
