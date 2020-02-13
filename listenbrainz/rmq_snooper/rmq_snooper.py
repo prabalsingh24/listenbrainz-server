@@ -6,6 +6,7 @@ import os
 import pika
 import ujson
 import logging
+import click
 
 from listenbrainz.listen import Listen
 from time import time, sleep
@@ -35,13 +36,7 @@ class RMQSnooperSubscriber(ListenWriter):
     def callback(self, ch, method, properties, body):
         listens = ujson.loads(body)
         self.process_listens(listens)
-
-        while True:
-            try:
-                self.channel.basic_ack(delivery_tag = method.delivery_tag)
-                break
-            except pika.exceptions.ConnectionClosed:
-                self.connect_to_rabbitmq()
+        # Do not ack the received messages, otherwise we start interfereing with the actual queue
 
         return True
 
@@ -52,11 +47,16 @@ class RMQSnooperSubscriber(ListenWriter):
         """
 
         for listen in listens:
-            user_name = listen['user_name']
+            try:
+                user_name = listen['user_name']
+            except:
+                continue
+
             if not user_name in self.stats:
                 self.stats[user_name] = 0
 
             self.stats[user_name] += 1
+                
 
         if self.next_update <= time():
             self.print_stats()
@@ -70,10 +70,11 @@ class RMQSnooperSubscriber(ListenWriter):
         print()
 
 
-    def start(self, exchange, queue):
+    def start(self, exchange, queue, ack = False):
 
         self.t0 = time()
         self.last_update = 0.0
+        self.ack = ack
 
         app = create_app()
         with app.app_context():
@@ -100,7 +101,10 @@ class RMQSnooperSubscriber(ListenWriter):
 
                 self.connection.close()
 
+def snooper():
+    rmq = RMQSnooperSubscriber()
+    rmq.start("incoming", "incoming");
+
 
 if __name__ == "__main__":
-    rmq = RMQSnooperSubscriber()
-    rmq.start("incoming", "incoming")
+    snooper()
