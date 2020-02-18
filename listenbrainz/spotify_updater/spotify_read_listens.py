@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import time
+from datetime import datetime
 import listenbrainz.webserver
 import json
 
@@ -68,9 +69,16 @@ def _convert_spotify_play_to_listen(play, listen_type):
     artist_name = ', '.join([a['name'] for a in artists])
     album_artist_name = ', '.join([a['name'] for a in album_artists])
 
+    # external spotify urls can be empty sometime
+    artist_ids = []
+    for a in artists:
+        if 'external_urls' in artists:
+            if 'spotify' in a['external_urls']:
+                artist_ids.append(a['external_urls']['spotify'])
+
     additional = {
         'tracknumber': track['track_number'],
-        'spotify_artist_ids': [a['external_urls']['spotify'] for a in artists],
+        'spotify_artist_ids': artist_ids,
         'artist_names': [a['name'] for a in artists],
         'listening_from': 'spotify',
         'discnumber': track['disc_number'],
@@ -207,7 +215,7 @@ def submit_listens_to_listenbrainz(listenbrainz_user, listens, listen_type=LISTE
                 raise spotify.SpotifyListenBrainzError('ISE while trying to import listens: %s', str(e))
 
 
-def parse_and_validate_spotify_plays(plays, listen_type, latest_listened_at = 0):
+def parse_and_validate_spotify_plays(plays, listen_type, latest_listened_at = None):
     """ Converts and validates the listens received from the Spotify API.
 
     Args:
@@ -218,10 +226,21 @@ def parse_and_validate_spotify_plays(plays, listen_type, latest_listened_at = 0)
         a list of valid listens to submit to ListenBrainz
     """
     listens = []
-    for play in plays:
+    prev_listen_at = 0
+    for i, play in enumerate(plays):
         listen = _convert_spotify_play_to_listen(play, listen_type=listen_type)
-        if latest_listened_at and listen and listen.listened_at <= latest_listened_at:
+        if not listen:
             continue
+
+#        if latest_listened_at and listen['listened_at'] <= datetime.timestamp(latest_listened_at):
+#            continue
+
+#        if i:
+#            if prev_listen_at < listen['listened_at']:
+#                print("previous listen at %d, current listen at: %d" % (listen['listened_at'], previous_listen_at))
+#
+#        prev_listen_at = listen['listened_at']
+#
 
         try:
             validate_listen(listen, listen_type)
@@ -229,7 +248,12 @@ def parse_and_validate_spotify_plays(plays, listen_type, latest_listened_at = 0)
         except BadRequest as e:
             current_app.logger.error(str(e))
             raise
-    return listens
+
+    # If we're fetching listens for a user for the first time, return them all. Otherwise just 3.
+    if not latest_listened_at:
+        return listens
+    else:
+        return listens[0:3]
 
 
 def process_one_user(user):
@@ -262,7 +286,7 @@ def process_one_user(user):
 
     recently_played = get_user_recently_played(user)
     if recently_played is not None and 'items' in recently_played:
-        before = len(listens)
+        before = len(recently_played['items'])
         listens = parse_and_validate_spotify_plays(recently_played['items'], LISTEN_TYPE_IMPORT, user.latest_listened_at)
         current_app.logger.debug('Received %d tracks for %s, submitting %d', before, str(user), len(listens))
 
